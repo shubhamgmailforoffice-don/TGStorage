@@ -13,6 +13,7 @@
 *.sqlite
 *.sqlite3
 *.key
+master.key
 
 # Private local configuration
 config.local.json
