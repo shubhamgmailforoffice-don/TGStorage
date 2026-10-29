@@ -5,10 +5,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/google/uuid"
 )
 
 type StoredFile struct {
-	ChunkRefs []TelegramChunkRef
+	ID         string
+	ChunkRefs  []TelegramChunkRef
 	WrappedKey []byte
 }
 
@@ -35,9 +38,10 @@ func UploadFile(
 	}
 
 	stored := &StoredFile{
-		WrappedKey: wrappedKey,
-		ChunkRefs:  []TelegramChunkRef{},
-	}
+    ID:        uuid.NewString(),
+    WrappedKey: wrappedKey,
+    ChunkRefs:  []TelegramChunkRef{},
+}
 
 	err = ProcessFileChunks(inputPath, fileKey, func(chunk EncryptedChunk) error {
 		ref, err := storage.UploadEncryptedChunk(ctx, chunk)
@@ -51,7 +55,16 @@ func UploadFile(
 		return nil, fmt.Errorf("upload file chunks: %w", err)
 	}
 
-	return stored, nil
+	metadataStore, err := NewMetadataStore("metadata.json")
+if err != nil {
+	return nil, fmt.Errorf("initialize metadata store: %w", err)
+}
+
+if err := metadataStore.Save(stored.ID, *stored); err != nil {
+	return nil, fmt.Errorf("save file metadata: %w", err)
+}
+
+return stored, nil
 }
 
 // DownloadFile downloads, decrypts, and reconstructs a previously stored file.
@@ -89,4 +102,19 @@ func DownloadFile(
 	}
 
 	return RestoreEncryptedChunks(chunks, fileKey, outputPath)
+}
+
+// GetStoredFile retrieves saved file metadata by its ID.
+func GetStoredFile(id string) (*StoredFile, error) {
+	metadataStore, err := NewMetadataStore("metadata.json")
+	if err != nil {
+		return nil, fmt.Errorf("initialize metadata store: %w", err)
+	}
+
+	stored, err := metadataStore.Get(id)
+	if err != nil {
+		return nil, fmt.Errorf("get stored file: %w", err)
+	}
+
+	return &stored, nil
 }
