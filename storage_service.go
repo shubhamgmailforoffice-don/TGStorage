@@ -135,3 +135,13 @@ func DownloadStoredFile(
 
 	return DownloadFile(ctx, storage, masterKey, stored, outputPath)
 }
+
+// ListStoredFileIDs returns all saved file IDs.
+func ListStoredFileIDs() ([]string, error) {
+	metadataStore, err := NewMetadataStore("metadata.json")
+	if err != nil {
+		return nil, fmt.Errorf("initialize metadata store: %w", err)
+	}
+
+	return metadataStore.ListIDs(), nil
+}
