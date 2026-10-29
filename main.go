@@ -1,63 +1,160 @@
-
 package main
 
 import (
-	"encoding/json"
+	"bufio"
+	"context"
 	"fmt"
-	"net/http"
 	"os"
-	"time"
+	"strings"
 )
 
-type TelegramResponse struct {
-	OK          bool   `json:"ok"`
-	Description string `json:"description"`
-	Result      struct {
-		ID        int64  `json:"id"`
-		Username  string `json:"username"`
-		FirstName string `json:"first_name"`
-	} `json:"result"`
+func main() {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("================================")
+	fmt.Println("       TGStorage")
+	fmt.Println("  Encrypted Telegram Storage")
+	fmt.Println("================================")
+	fmt.Println()
+
+	masterKey, err := GetMasterKey()
+	if err != nil {
+		fmt.Println("ERROR: Could not load master key:", err)
+		pause(reader)
+		return
+	}
+
+	storage, err := NewTelegramStorageFromEnv()
+	if err != nil {
+		fmt.Println("ERROR: Telegram configuration:", err)
+		fmt.Println("Check TGSTORE_BOT_TOKEN and TGSTORE_CHAT_ID.")
+		pause(reader)
+		return
+	}
+
+	ctx := context.Background()
+
+	for {
+		fmt.Println()
+		fmt.Println("========== MAIN MENU ==========")
+		fmt.Println("1. Upload a file")
+		fmt.Println("2. List stored file IDs")
+		fmt.Println("3. Download a file")
+		fmt.Println("4. Exit")
+		fmt.Println("===============================")
+
+		choice := readInput(reader, "Choose an option: ")
+
+		switch choice {
+		case "1":
+			fmt.Println()
+			inputPath := readInput(reader, "Enter the full path of the file to upload: ")
+
+			if inputPath == "" {
+				fmt.Println("ERROR: File path cannot be empty.")
+				continue
+			}
+
+			info, err := os.Stat(inputPath)
+			if err != nil {
+				fmt.Println("ERROR: Cannot access file:", err)
+				continue
+			}
+			if !info.Mode().IsRegular() {
+				fmt.Println("ERROR: Please select a regular file.")
+				continue
+			}
+
+			fmt.Println("Encrypting and uploading file chunks...")
+
+			stored, err := UploadFile(ctx, storage, masterKey, inputPath)
+			if err != nil {
+				fmt.Println("ERROR: Upload failed:", err)
+				continue
+			}
+
+			fmt.Println()
+			fmt.Println("SUCCESS: File uploaded and encrypted.")
+			fmt.Println("File ID:", stored.ID)
+			fmt.Println("Chunks uploaded:", len(stored.ChunkRefs))
+			fmt.Println("Save the file ID to download this file later.")
+
+		case "2":
+			fmt.Println()
+			ids, err := ListStoredFileIDs()
+			if err != nil {
+				fmt.Println("ERROR: Could not list files:", err)
+				continue
+			}
+
+			if len(ids) == 0 {
+				fmt.Println("No stored files found.")
+				continue
+			}
+
+			fmt.Println("Stored file IDs:")
+			for i, id := range ids {
+				fmt.Printf("%d. %s\n", i+1, id)
+			}
+
+		case "3":
+			fmt.Println()
+			id := readInput(reader, "Enter the file ID: ")
+			if id == "" {
+				fmt.Println("ERROR: File ID cannot be empty.")
+				continue
+			}
+
+			outputPath := readInput(reader, "Enter the output file path: ")
+			if outputPath == "" {
+				fmt.Println("ERROR: Output path cannot be empty.")
+				continue
+			}
+
+			if _, err := os.Stat(outputPath); err == nil {
+				overwrite := readInput(reader, "File exists. Overwrite it? (yes/no): ")
+				if !strings.EqualFold(overwrite, "yes") {
+					fmt.Println("Download cancelled.")
+					continue
+				}
+			}
+
+			fmt.Println("Downloading and decrypting file...")
+
+			err := DownloadStoredFile(
+				ctx,
+				storage,
+				masterKey,
+				id,
+				outputPath,
+			)
+			if err != nil {
+				fmt.Println("ERROR: Download failed:", err)
+				continue
+			}
+
+			fmt.Println("SUCCESS: File restored to:", outputPath)
+
+		case "4":
+			fmt.Println("TGStorage closed.")
+			return
+
+		default:
+			fmt.Println("Invalid option. Enter 1, 2, 3, or 4.")
+		}
+	}
 }
 
-func main() {
-	token := os.Getenv("TGSTORE_BOT_TOKEN")
-	if token == "" {
-		fmt.Println("ERROR: TGSTORE_BOT_TOKEN is not set.")
-		fmt.Println("Set your bot token in this CMD window first.")
-		os.Exit(1)
+func readInput(reader *bufio.Reader, prompt string) string {
+	fmt.Print(prompt)
+	input, err := reader.ReadString('\n')
+	if err != nil && len(input) == 0 {
+		return ""
 	}
+	return strings.TrimSpace(input)
+}
 
-	client := &http.Client{Timeout: 15 * time.Second}
-	url := "https://api.telegram.org/bot" + token + "/getMe"
-
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		fmt.Println("ERROR: Could not create request.")
-		os.Exit(1)
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("ERROR: Could not connect to Telegram.")
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-
-	var result TelegramResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		fmt.Println("ERROR: Could not read Telegram response.")
-		os.Exit(1)
-	}
-
-	if !result.OK {
-		fmt.Println("ERROR: Telegram rejected the token.")
-		fmt.Println("Check that your current token is valid.")
-		os.Exit(1)
-	}
-
-	fmt.Println("SUCCESS: Connected to Telegram!")
-	fmt.Println("Bot name:", result.Result.FirstName)
-	fmt.Println("Bot username:", "@"+result.Result.Username)
-	fmt.Println("Bot ID:", result.Result.ID)
-	fmt.Println("Token was not displayed.")
+func pause(reader *bufio.Reader) {
+	fmt.Print("Press Enter to close...")
+	_, _ = reader.ReadString('\n')
 }

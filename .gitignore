@@ -17,3 +17,6 @@ master.key
 
 # Private local configuration
 config.local.json
+
+# Local file metadata
+metadata.json
