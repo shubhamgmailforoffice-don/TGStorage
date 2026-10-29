@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -7,13 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
 
 type MetadataStore struct {
-	mu       sync.RWMutex
-	path     string
-	files    map[string]StoredFile
+	mu    sync.RWMutex
+	path  string
+	files map[string]StoredFile
 }
 
 func NewMetadataStore(path string) (*MetadataStore, error) {
@@ -44,8 +44,7 @@ func NewMetadataStore(path string) (*MetadataStore, error) {
 	return store, nil
 }
 
-// Save stores metadata under a caller-provided file ID.
-// Store only wrapped file keys, never plaintext file keys.
+// Save stores metadata without exposing the plaintext file key.
 func (s *MetadataStore) Save(id string, file StoredFile) error {
 	if id == "" {
 		return errors.New("file ID is required")
@@ -54,24 +53,55 @@ func (s *MetadataStore) Save(id string, file StoredFile) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.files[id] = file
+	// Build a separate map so existing in-memory data remains unchanged
+	// if encoding or writing fails.
+	next := make(map[string]StoredFile, len(s.files)+1)
+	for key, value := range s.files {
+		next[key] = value
+	}
+	next[id] = file
 
-	data, err := json.MarshalIndent(s.files, "", "  ")
+	data, err := json.MarshalIndent(next, "", "  ")
 	if err != nil {
-		delete(s.files, id)
 		return fmt.Errorf("encode metadata: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
-		delete(s.files, id)
+	dir := filepath.Dir(s.path)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("create metadata directory: %w", err)
 	}
 
-	if err := os.WriteFile(s.path, data, 0600); err != nil {
-		delete(s.files, id)
-		return fmt.Errorf("write metadata: %w", err)
+	temp, err := os.CreateTemp(dir, ".metadata-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary metadata file: %w", err)
+	}
+	tempPath := temp.Name()
+	defer os.Remove(tempPath)
+
+	if err := temp.Chmod(0600); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("set metadata permissions: %w", err)
 	}
 
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("write temporary metadata: %w", err)
+	}
+
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return fmt.Errorf("sync temporary metadata: %w", err)
+	}
+
+	if err := temp.Close(); err != nil {
+		return fmt.Errorf("close temporary metadata: %w", err)
+	}
+
+	if err := os.Rename(tempPath, s.path); err != nil {
+		return fmt.Errorf("replace metadata file: %w", err)
+	}
+
+	s.files = next
 	return nil
 }
 
@@ -88,7 +118,7 @@ func (s *MetadataStore) Get(id string) (StoredFile, error) {
 	return file, nil
 }
 
-// ListIDs returns all saved file IDs.
+// ListIDs returns saved file IDs in a stable order.
 func (s *MetadataStore) ListIDs() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -97,6 +127,7 @@ func (s *MetadataStore) ListIDs() []string {
 	for id := range s.files {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 
 	return ids
 }
