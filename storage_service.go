@@ -118,3 +118,20 @@ func GetStoredFile(id string) (*StoredFile, error) {
 
 	return &stored, nil
 }
+
+
+// DownloadStoredFile downloads a file using its saved metadata ID.
+func DownloadStoredFile(
+	ctx context.Context,
+	storage *TelegramStorage,
+	masterKey []byte,
+	id string,
+	outputPath string,
+) error {
+	stored, err := GetStoredFile(id)
+	if err != nil {
+		return err
+	}
+
+	return DownloadFile(ctx, storage, masterKey, stored, outputPath)
+}
