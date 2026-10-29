@@ -1,0 +1,18 @@
+# Secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Go build outputs
+*.exe
+*.test
+*.out
+
+# Local database and encryption keys
+*.db
+*.sqlite
+*.sqlite3
+*.key
+
+# Private local configuration
+config.local.json
