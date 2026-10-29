@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -9,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -144,8 +144,6 @@ func (s *TelegramStorage) UploadEncryptedChunk(
 	}, nil
 }
 
-
-
 // DownloadEncryptedChunk downloads a previously uploaded Telegram document.
 func (s *TelegramStorage) DownloadEncryptedChunk(
 	ctx context.Context,
@@ -159,10 +157,13 @@ func (s *TelegramStorage) DownloadEncryptedChunk(
 	}
 
 	endpoint := fmt.Sprintf(
-		"https://api.telegram.org/bot%s/getFile?file_id=%s",
+		"https://api.telegram.org/bot%s/getFile",
 		s.BotToken,
-		ref.FileID,
 	)
+
+	query := url.Values{}
+	query.Set("file_id", ref.FileID)
+	endpoint += "?" + query.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
